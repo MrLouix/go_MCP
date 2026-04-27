@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Go MCP Player</title>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; background:#f6f6f6; }
+  .panel { background:#fff; border-radius:8px; padding:16px; margin-bottom:16px; box-shadow:0 2px 6px rgba(0,0,0,0.08); }
+  #goban { display: grid; background: #dcb35c; border: 2px solid #8b6914; margin: 0 auto; }
+  .cell { display:flex; align-items:center; justify-content:center; position:relative; cursor: pointer; }
+  .cell:hover { background: rgba(255,255,255,0.15); }
+  .stone { width:80%; height:80%; border-radius:50%; box-shadow: 1px 1px 3px rgba(0,0,0,.35); pointer-events:none; }
+  .stone.black { background:#1a1a1a; }
+  .stone.white { background:#f5f5f5; }
+  .last-move::after { content:""; position:absolute; width:6px; height:6px; background:red; border-radius:50%; }
+  .coord-label { position:absolute; font-size:10px; color:#333; opacity:.7; pointer-events:none; }
+  .row { display:flex; gap:10px; align-items:center; margin: 8px 0; }
+  button { padding:8px 12px; border-radius:6px; border:none; background:#111; color:#fff; cursor:pointer; }
+  button.secondary { background:#ddd; color:#111; }
+  .status { font-weight:600; }
+  pre { background:#f0f0f0; padding:10px; border-radius:6px; overflow:auto; max-height:200px; }
+</style>
+</head>
+<body>
+<h1>Interface Joueur Go</h1>
+
+<div class="panel" id="connectPanel">
+  <h3>Connexion à une partie</h3>
+  <div class="row">
+    <input id="gameId" placeholder="Game ID" style="width:260px" />
+    <select id="joinColor"><option value="">Auto</option><option value="black">Noir</option><option value="white">Blanc</option></select>
+    <button onclick="joinGame()">Rejoindre</button>
+  </div>
+  <div id="joinResult" style="margin-top:8px; color:#006622; font-weight:600;"></div>
+</div>
+
+<div class="panel" id="gamePanel" style="display:none">
+  <div class="row" style="justify-content:space-between">
+    <div>Partie: <b id="dispGameId"></b> | Tu joues: <b id="dispColor"></b></div>
+    <div class="status" id="statusText">En attente...</div>
+  </div>
+  <div style="overflow:auto">
+    <div id="goban"></div>
+  </div>
+  <div class="row" style="margin-top:12px; justify-content:center">
+    <button onclick="sendPass()">Passer</button>
+    <button class="secondary" onclick="sendResign()">Abandonner</button>
+  </div>
+  <div style="margin-top:8px;">Prisonniers — ⚫ <b id="capBlack">0</b> / ⚪ <b id="capWhite">0</b></div>
+  <pre id="jsonState"></pre>
+</div>
+
+<script>
+const socket = io();
+let gameId = null;
+let playerSecret = null;
+let myColor = null;
+let currentState = null;
+let lastMoveRef = null;
+
+async function joinGame() {
+  const gid = document.getElementById('gameId').value.trim();
+  const color = document.getElementById('joinColor').value || undefined;
+  if (!gid) return alert('Entre un Game ID');
+  const res = await fetch(`/api/games/${gid}/join`, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ color })
+  });
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
+  gameId = gid;
+  playerSecret = data.playerSecret;
+  myColor = data.color;
+  document.getElementById('joinResult').textContent = `Connecté en tant que ${myColor}. Secret: ${playerSecret}`;
+  document.getElementById('connectPanel').style.display = 'none';
+  document.getElementById('gamePanel').style.display = 'block';
+  document.getElementById('dispGameId').textContent = gameId.slice(0,8);
+  document.getElementById('dispColor').textContent = myColor;
+  socket.emit('subscribe_game', gameId);
+}
+
+function render(state) {
+  currentState = state;
+  const size = state.boardSize;
+  const cell = Math.max(22, Math.min(36, Math.floor(640/size)));
+  const container = document.getElementById('goban');
+  container.style.gridTemplateColumns = `repeat(${size}, ${cell}px)`;
+  container.style.gridTemplateRows = `repeat(${size}, ${cell}px)`;
+  container.style.width = `${size*cell}px`;
+  container.style.height = `${size*cell}px`;
+  container.innerHTML = '';
+  const cols = 'ABCDEFGHJKLMNOPQRST';
+  const last = state.history.length ? state.history[state.history.length-1] : null;
+  let lastXY = {x:-1,y:-1};
+  if (last && last.move !== 'pass') {
+    const cc = last.move;
+    lastXY.x = cc.charCodeAt(0)-'A'.charCodeAt(0);
+    lastXY.y = parseInt(cc.slice(1),10)-1;
+  }
+
+  for (let y = size-1; y >= 0; y--) {
+    for (let x = 0; x < size; x++) {
+      const div = document.createElement('div');
+      div.className = 'cell';
+      div.style.width = cell+'px'; div.style.height = cell+'px';
+      div.style.borderTop = y < size-1 ? '1px solid #8b6914' : 'none';
+      div.style.borderLeft = x > 0 ? '1px solid #8b6914' : 'none';
+      div.style.borderRight = x === size-1 ? '1px solid #8b6914' : 'none';
+      div.style.borderBottom = y === 0 ? '1px solid #8b6914' : 'none';
+      const s = state.board[y][x];
+      if (s !== 0) {
+        const stone = document.createElement('div');
+        stone.className = 'stone ' + (s===1 ? 'black' : 'white');
+        if (x===lastXY.x && y===lastXY.y) stone.classList.add('last-move');
+        div.appendChild(stone);
+      }
+      div.onclick = () => cellClick(x, y);
+      if (y===size-1) { const cl=document.createElement('span'); cl.className='coord-label'; cl.style.bottom='2px'; cl.textContent=cols[x]; div.appendChild(cl); }
+      if (x===0) { const rl=document.createElement('span'); rl.className='coord-label'; rl.style.left='2px'; rl.textContent=''+(y+1); div.appendChild(rl); }
+      container.appendChild(div);
+    }
+  }
+
+  document.getElementById('capBlack').textContent = state.captures.black;
+  document.getElementById('capWhite').textContent = state.captures.white;
+
+  const isMyTurn = state.status === 'playing' && state.turn === myColor;
+  let status = '';
+  if (state.status === 'waiting') status = "En attente d'un joueur";
+  else if (state.status === 'ended') status = `Partie terminée. Gagnant: ${state.winner || 'N/A'} (${state.winReason})`;
+  else if (isMyTurn) status = "C'est ton tour !";
+  else status = `Au tour de ${state.turn}`;
+  document.getElementById('statusText').textContent = status;
+  document.getElementById('jsonState').textContent = JSON.stringify(state, null, 2);
+}
+
+function cellClick(x, y) {
+  if (!currentState || currentState.status !== 'playing' || currentState.turn !== myColor) return;
+  const cols = 'ABCDEFGHJKLMNOPQRST';
+  const move = cols[x] + (y+1);
+  socket.emit('make_move', { gameId, playerSecret, move });
+}
+
+function sendPass() { socket.emit('make_move', { gameId, playerSecret, move: 'pass' }); }
+function sendResign() {
+  if (!confirm('Abandonner ?')) return;
+  fetch(`/api/games/${gameId}/resign`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({playerSecret}) });
+}
+
+socket.on('game_update', (state) => { if (state.id === gameId) render(state); });
+socket.on('error_msg', (msg) => alert('Erreur: ' + msg));
+</script>
+</body>
+</html>

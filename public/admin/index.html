@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Go MCP Admin</title>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background:#f6f6f6; }
+  h1 { margin-bottom: 10px; }
+  .panel { background:#fff; border-radius:8px; padding:16px; margin-bottom:16px; box-shadow:0 2px 6px rgba(0,0,0,0.08); }
+  table { width:100%; border-collapse: collapse; }
+  th, td { text-align:left; padding:8px; border-bottom:1px solid #eee; }
+  button { padding:8px 12px; border-radius:6px; border:none; background:#111; color:#fff; cursor:pointer; }
+  button.secondary { background:#ddd; color:#111; }
+  .flex { display:flex; gap:12px; flex-wrap:wrap; }
+  #goban { display: grid; background: #dcb35c; border: 2px solid #8b6914; }
+  .cell { display:flex; align-items:center; justify-content:center; position:relative; }
+  .stone { width:80%; height:80%; border-radius:50%; box-shadow: 1px 1px 3px rgba(0,0,0,.35); }
+  .stone.black { background:#1a1a1a; }
+  .stone.white { background:#f5f5f5; }
+  .coord-label { position:absolute; font-size:10px; color:#333; opacity:.7; }
+</style>
+</head>
+<body>
+<h1>Go MCP Server — Administration</h1>
+
+<div class="panel">
+  <h3>Créer une partie</h3>
+  <div class="flex">
+    <select id="createSize">
+      <option value="9">9x9</option>
+      <option value="13">13x13</option>
+      <option value="19" selected>19x19</option>
+    </select>
+    <input id="createKomi" type="number" value="7.5" step="0.5" style="width:80px" />
+    <button onclick="createGame()">Créer</button>
+  </div>
+</div>
+
+<div class="panel">
+  <h3>Liste des parties</h3>
+  <table>
+    <thead><tr><th>ID</th><th>Taille</th><th>État</th><th>Noir</th><th>Blanc</th><th>Tour</th><th>Prisonniers</th><th>Action</th></tr></thead>
+    <tbody id="gamesTable"></tbody>
+  </table>
+</div>
+
+<div class="panel" id="viewPanel" style="display:none">
+  <h3>Vue Partie <span id="viewId"></span></h3>
+  <div id="goban"></div>
+  <pre id="jsonState" style="margin-top:10px; background:#f0f0f0; padding:10px; border-radius:6px; overflow:auto; max-height:240px;"></pre>
+</div>
+
+<script>
+const socket = io();
+socket.emit('subscribe_admin');
+
+let selectedGameId = null;
+
+function createGame() {
+  const size = parseInt(document.getElementById('createSize').value, 10);
+  const komi = parseFloat(document.getElementById('createKomi').value);
+  socket.emit('create_game', { boardSize: size, komi });
+}
+
+function selectGame(id) {
+  selectedGameId = id;
+  socket.emit('subscribe_game', id);
+}
+
+function renderTable(games) {
+  const tb = document.getElementById('gamesTable');
+  tb.innerHTML = '';
+  games.forEach(g => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${g.id.slice(0,8)}</td>
+      <td>${g.boardSize}</td>
+      <td>${g.status}</td>
+      <td>${g.blackPlayer ? '✅' : '❌'}</td>
+      <td>${g.whitePlayer ? '✅' : '❌'}</td>
+      <td>${g.turn}</td>
+      <td>⚫ ${g.captures.black} / ⚪ ${g.captures.white}</td>
+      <td><button class="secondary" onclick="selectGame('${g.id}')">Voir</button></td>
+    `;
+    tb.appendChild(tr);
+  });
+}
+
+function renderGoban(state) {
+  const panel = document.getElementById('viewPanel');
+  panel.style.display = 'block';
+  document.getElementById('viewId').textContent = state.id.slice(0,8);
+  const container = document.getElementById('goban');
+  const size = state.boardSize;
+  const cell = 28;
+  container.style.gridTemplateColumns = `repeat(${size}, ${cell}px)`;
+  container.style.gridTemplateRows = `repeat(${size}, ${cell}px)`;
+  container.style.width = `${size*cell}px`;
+  container.style.height = `${size*cell}px`;
+  container.innerHTML = '';
+  const cols = 'ABCDEFGHJKLMNOPQRST';
+
+  for (let y = size-1; y >= 0; y--) {
+    for (let x = 0; x < size; x++) {
+      const div = document.createElement('div');
+      div.className = 'cell';
+      div.style.width = cell+'px';
+      div.style.height = cell+'px';
+      div.style.borderTop = y < size-1 ? '1px solid #8b6914' : 'none';
+      div.style.borderLeft = x > 0 ? '1px solid #8b6914' : 'none';
+      div.style.borderRight = x === size-1 ? '1px solid #8b6914' : 'none';
+      div.style.borderBottom = y === 0 ? '1px solid #8b6914' : 'none';
+
+      const s = state.board[y][x];
+      if (s !== 0) {
+        const stone = document.createElement('div');
+        stone.className = 'stone ' + (s===1 ? 'black' : 'white');
+        div.appendChild(stone);
+      }
+      if (y === size-1) {
+        const cl = document.createElement('span');
+        cl.className='coord-label'; cl.style.bottom='2px'; cl.textContent = cols[x];
+        div.appendChild(cl);
+      }
+      if (x === 0) {
+        const rl = document.createElement('span');
+        rl.className='coord-label'; rl.style.left='2px'; rl.textContent = (y+1);
+        div.appendChild(rl);
+      }
+      container.appendChild(div);
+    }
+  }
+  document.getElementById('jsonState').textContent = JSON.stringify(state, null, 2);
+}
+
+socket.on('games_list', (games) => renderTable(games));
+socket.on('game_update', (state) => { if (state.id === selectedGameId) renderGoban(state); });
+</script>
+</body>
+</html>
