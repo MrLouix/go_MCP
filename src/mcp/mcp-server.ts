@@ -3,7 +3,7 @@ import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
-} from '@modelcontextprotocol/sdk/server/types.js';
+} from '@modelcontextprotocol/sdk/types';
 import type { Express, Request, Response } from 'express';
 import { GameManager } from '../game/game-manager.js';
 import { boardToAscii } from '../game/go-engine.js';

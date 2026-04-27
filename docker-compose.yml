@@ -2,7 +2,7 @@ services:
   go-mcp-server:
     build: .
     ports:
-      - "3000:3000"
+      - "3003:3003"
     environment:
-      - PORT=3000
+      - PORT=3003
     restart: unless-stopped

@@ -2,7 +2,7 @@ import { GameManager } from './game/game-manager.js';
 import { createHttpServer } from './api/http-server.js';
 import { GoMcpServer } from './mcp/mcp-server.js';
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3003;
 
 const gameManager = new GameManager();
 const { httpServer, app } = createHttpServer(gameManager);
