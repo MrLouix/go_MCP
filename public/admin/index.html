@@ -12,6 +12,9 @@
   th, td { text-align:left; padding:8px; border-bottom:1px solid #eee; }
   button { padding:8px 12px; border-radius:6px; border:none; background:#111; color:#fff; cursor:pointer; }
   button.secondary { background:#ddd; color:#111; }
+  button.danger { background:#dc3545; }
+  button.danger:hover { background:#c82333; }
+  button.copy { background:#28a745; }
   .flex { display:flex; gap:12px; flex-wrap:wrap; }
   #goban { display: grid; background: #dcb35c; border: 2px solid #8b6914; }
   .cell { display:flex; align-items:center; justify-content:center; position:relative; }
@@ -19,6 +22,20 @@
   .stone.black { background:#1a1a1a; }
   .stone.white { background:#f5f5f5; }
   .coord-label { position:absolute; font-size:10px; color:#333; opacity:.7; }
+
+  .game-id { font-size:11px; cursor:pointer; user-select:none; color:#0066cc; font-weight:600; }
+  .game-id:hover { text-decoration:underline; }
+
+  .modal-overlay { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.45); display:flex; align-items:center; justify-content:center; z-index:1000; }
+  .modal-overlay.hidden { display:none; }
+  .modal { background:#fff; border-radius:12px; padding:24px; max-width:440px; width:90%; box-shadow:0 8px 30px rgba(0,0,0,0.25); }
+  .modal h3 { margin:0 0 12px 0; }
+  .modal p { margin:0 0 12px 0; color:#555; font-size:14px; }
+  .modal .id-display { background:#f0f0f0; border:1px solid #ddd; border-radius:6px; padding:10px 14px; font-family:'Courier New',monospace; font-size:13px; word-break:break-all; margin:8px 0 16px; display:block; line-height:1.5; }
+  .modal .modal-actions { display:flex; gap:8px; justify-content:flex-end; }
+  button.copy { background:#28a745; }
+
+  #toast { position:fixed; bottom:40px; left:50%; transform:translateX(-50%); background:#1a1a1a; color:#fff; padding:12px 24px; border-radius:8px; font-size:15px; z-index:2000; display:none; }
 </style>
 </head>
 <body>
@@ -40,7 +57,7 @@
 <div class="panel">
   <h3>Liste des parties</h3>
   <table>
-    <thead><tr><th>ID</th><th>Taille</th><th>État</th><th>Noir</th><th>Blanc</th><th>Tour</th><th>Prisonniers</th><th>Action</th></tr></thead>
+    <thead><tr><th>ID</th><th>Taille</th><th>État</th><th>Noir</th><th>Blanc</th><th>Tour</th><th>Prisonniers</th><th>Actions</th></tr></thead>
     <tbody id="gamesTable"></tbody>
   </table>
 </div>
@@ -51,11 +68,41 @@
   <pre id="jsonState" style="margin-top:10px; background:#f0f0f0; padding:10px; border-radius:6px; overflow:auto; max-height:240px;"></pre>
 </div>
 
+<!-- Modal: affichage ID -->
+<div id="idModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3>ID de la partie</h3>
+    <p>Cliquez « Copier » pour copier l'ID dans le presse-papiers :</p>
+    <span id="showGameId" class="id-display"></span>
+    <div class="modal-actions">
+      <button class="copy" onclick="copyWithToast()">Copier</button>
+      <button class="secondary" onclick="idModal.classList.add('hidden')">Fermer</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast">Copié !</div>
+
+<!-- Modal: confirmation suppression -->
+<div id="deleteModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3>Supprimer cette partie ?</h3>
+    <p>Cette action est irréversible.</p>
+    <span id="deleteGameId" class="id-display"></span>
+    <div class="modal-actions">
+      <button class="secondary" onclick="closeDeleteModal()">Annuler</button>
+      <button class="danger" onclick="confirmDelete()">Supprimer</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const socket = io();
 socket.emit('subscribe_admin');
 
 let selectedGameId = null;
+let pendingDeleteId = null;
+let currentIdToCopy = null;
 
 function createGame() {
   const size = parseInt(document.getElementById('createSize').value, 10);
@@ -71,20 +118,89 @@ function selectGame(id) {
 function renderTable(games) {
   const tb = document.getElementById('gamesTable');
   tb.innerHTML = '';
+  if (!games.length) {
+    tb.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#999">Aucune partie</td></tr>';
+    return;
+  }
   games.forEach(g => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${g.id.slice(0,8)}</td>
+      <td><span class="game-id" onclick="showIdModal('${g.id}')" title="Cliquer pour voir l'ID complet">${g.id.slice(0,8)}…</span></td>
       <td>${g.boardSize}</td>
       <td>${g.status}</td>
       <td>${g.blackPlayer ? '✅' : '❌'}</td>
       <td>${g.whitePlayer ? '✅' : '❌'}</td>
       <td>${g.turn}</td>
       <td>⚫ ${g.captures.black} / ⚪ ${g.captures.white}</td>
-      <td><button class="secondary" onclick="selectGame('${g.id}')">Voir</button></td>
+      <td>
+        <button class="secondary" onclick="selectGame('${g.id}')">Voir</button>
+        <button onclick="openPlayer('${g.id}')">Jouer</button>
+        <button class="danger" onclick="requestDelete('${g.id}')">🗑</button>
+      </td>
     `;
     tb.appendChild(tr);
   });
+}
+
+function showIdModal(id) {
+  currentIdToCopy = id;
+  document.getElementById('showGameId').textContent = id;
+  document.getElementById('idModal').classList.remove('hidden');
+}
+
+function showMsg(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.display = 'block';
+  setTimeout(() => { t.style.display = 'none'; }, 1500);
+}
+
+function copyWithToast() {
+  if (!currentIdToCopy) return;
+  const ta = document.createElement('textarea');
+  ta.value = currentIdToCopy;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  document.body.removeChild(ta);
+  showMsg('Copié !');
+}
+
+function openPlayer(id) {
+  window.open(`/player/?game=${id}`, '_blank');
+}
+
+function requestDelete(id) {
+  pendingDeleteId = id;
+  document.getElementById('deleteGameId').textContent = id;
+  document.getElementById('deleteModal').classList.remove('hidden');
+}
+
+function closeDeleteModal() {
+  pendingDeleteId = null;
+  document.getElementById('deleteModal').classList.add('hidden');
+}
+
+async function confirmDelete() {
+  if (!pendingDeleteId) return;
+  const id = pendingDeleteId;
+  closeDeleteModal();
+  try {
+    const res = await fetch(`/api/games/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const text = await res.text();
+      let errMsg = res.statusText;
+      try { errMsg = JSON.parse(text).error || res.statusText; } catch {}
+      alert('Erreur : ' + errMsg);
+      return;
+    }
+    showMsg('Partie supprimée');
+    if (selectedGameId === id) selectedGameId = null;
+  } catch (e) {
+    alert('Erreur réseau : ' + e.message);
+  }
 }
 
 function renderGoban(state) {

@@ -59,6 +59,10 @@ let myColor = null;
 let currentState = null;
 let lastMoveRef = null;
 
+const params = new URLSearchParams(window.location.search);
+const urlGame = params.get('game');
+if (urlGame) document.getElementById('gameId').value = urlGame;
+
 async function joinGame() {
   const gid = document.getElementById('gameId').value.trim();
   const color = document.getElementById('joinColor').value || undefined;

@@ -110,6 +110,14 @@ export class GameManager extends EventEmitter {
     return { success: true, state: toPublicState(game) };
   }
 
+  deleteGame(gameId: string): boolean {
+    const exists = this.games.delete(gameId);
+    if (exists) {
+      this.emit('gamesChanged');
+    }
+    return exists;
+  }
+
   waitForTurn(gameId: string, playerSecret: string, timeoutMs = 30000): Promise<PublicGameState> {
     return new Promise((resolve, reject) => {
       const game = this.games.get(gameId);

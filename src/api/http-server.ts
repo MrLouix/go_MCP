@@ -13,6 +13,25 @@ export function createHttpServer(gameManager: GameManager) {
   const io = new SocketIOServer(httpServer, { cors: { origin: '*' } });
 
   app.use(express.json());
+
+  // Disable caching for HTML pages to always serve latest version
+  app.use('/admin', express.static(path.join(__dirname, '../../public/admin'), {
+    maxAge: 0,
+    setHeaders: (res) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+  }));
+  app.use('/player', express.static(path.join(__dirname, '../../public/player'), {
+    maxAge: 0,
+    setHeaders: (res) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+  }));
+  // Cache for other static assets (socket.io, etc)
   app.use(express.static(path.join(__dirname, '../../public')));
 
   app.get('/api/games', (req, res) => {
@@ -53,6 +72,12 @@ export function createHttpServer(gameManager: GameManager) {
     const result = gameManager.resign(req.params.id, playerSecret);
     if ('error' in result) return res.status(400).json({ error: result.error });
     res.json(result);
+  });
+
+  app.delete('/api/games/:id', (req, res) => {
+    const deleted = gameManager.deleteGame(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Game not found' });
+    res.json({ success: true, message: 'Game deleted' });
   });
 
   io.on('connection', (socket) => {
