@@ -1,6 +1,6 @@
 # Contribuer au projet
 
-Merci de votre inter^t ! Voici comment contribuer.
+Merci de votre interêt ! Voici comment contribuer.
 
 ## Workflow
 
